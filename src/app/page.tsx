@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface FormData {
   name: string;
@@ -26,24 +27,8 @@ export default function Home() {
   const [formData, setFormData] = useState<FormData>(initialFormData);
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState<Partial<FormData>>({});
-  const [duplicateError, setDuplicateError] = useState(false);
-
-  const getSubmittedEmails = (): string[] => {
-    if (typeof window === "undefined") return [];
-    try {
-      const stored = localStorage.getItem("workshopSubmittedEmails");
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveSubmittedEmail = (email: string) => {
-    if (typeof window === "undefined") return;
-    const emails = getSubmittedEmails();
-    emails.push(email.toLowerCase());
-    localStorage.setItem("workshopSubmittedEmails", JSON.stringify(emails));
-  };
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validate = (): boolean => {
     const newErrors: Partial<FormData> = {};
@@ -71,23 +56,45 @@ export default function Home() {
     if (errors[name as keyof FormData]) {
       setErrors((prev) => ({ ...prev, [name]: undefined }));
     }
-    if (name === "email") setDuplicateError(false);
+    setSubmitError(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setDuplicateError(false);
+    setSubmitError(null);
 
     if (!validate()) return;
 
-    const submittedEmails = getSubmittedEmails();
-    if (submittedEmails.includes(formData.email.toLowerCase())) {
-      setDuplicateError(true);
+    if (!supabase) {
+      setSubmitError("서버 연결 설정이 되어 있지 않습니다. 관리자에게 문의해주세요.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const { error } = await supabase.from("signups").insert({
+      name: formData.name.trim(),
+      email: formData.email.trim().toLowerCase(),
+      department: formData.department,
+      position: formData.rank,
+      ai_experience: formData.aiExperience,
+      learning_goal: formData.learningGoal,
+      dietary_restrictions: formData.dietaryRestrictions.trim() || null,
+    });
+
+    setIsSubmitting(false);
+
+    if (error) {
+      if (error.code === "23505") {
+        setSubmitError("이미 신청된 이메일입니다. 다른 이메일을 사용해주세요.");
+      } else {
+        setSubmitError("신청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        console.error("Supabase insert error:", error);
+      }
       return;
     }
 
     console.log("Workshop Registration:", formData);
-    saveSubmittedEmail(formData.email);
     setSubmitted(true);
   };
 
@@ -211,13 +218,10 @@ export default function Home() {
                   onChange={handleChange}
                   placeholder="hong@company.com"
                   className={`w-full border rounded-lg px-4 py-2.5 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff6b35] focus:border-transparent transition ${
-                    errors.email || duplicateError ? "border-red-400 bg-red-50" : "border-gray-300"
+                    errors.email ? "border-red-400 bg-red-50" : "border-gray-300"
                   }`}
                 />
                 {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
-                {duplicateError && (
-                  <p className="text-red-500 text-xs mt-1">이미 신청된 이메일입니다.</p>
-                )}
               </div>
 
               {/* 소속 팀/부서 */}
@@ -337,12 +341,20 @@ export default function Home() {
                 />
               </div>
 
+              {/* Submit Error */}
+              {submitError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700 text-sm">
+                  {submitError}
+                </div>
+              )}
+
               {/* Submit */}
               <button
                 type="submit"
-                className="w-full bg-[#ff6b35] hover:bg-orange-500 active:bg-orange-600 text-white font-bold py-3.5 rounded-xl text-base transition-colors duration-150 mt-2 shadow-lg"
+                disabled={isSubmitting}
+                className="w-full bg-[#ff6b35] hover:bg-orange-500 active:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl text-base transition-colors duration-150 mt-2 shadow-lg"
               >
-                신청하기
+                {isSubmitting ? "신청 중..." : "신청하기"}
               </button>
             </form>
           </div>
